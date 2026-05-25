@@ -1,3 +1,4 @@
 flask
 requests
 gunicorn
+git+https://github.com/TradeLocker/tradelocker-python.git
