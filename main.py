@@ -5,80 +5,138 @@ import traceback
 
 app = Flask(__name__)
 
-ENV_URL = "https://live.tradelocker.com" if os.getenv("TL_ENV") == "live" else "https://demo.tradelocker.com"
+# ENV VARIABLES
+TL_EMAIL = os.getenv("TL_EMAIL")
+TL_PASSWORD = os.getenv("TL_PASSWORD")
+TL_SERVER = os.getenv("TL_SERVER")
+TL_ENV = os.getenv("TL_ENV")
+TL_ACCOUNT_ID = os.getenv("TL_ACCOUNT_ID")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
-def get_tl():
-    return TLAPI(
-        environment=ENV_URL,
-        username=os.getenv("TL_EMAIL"),
-        password=os.getenv("TL_PASSWORD"),
-        server=os.getenv("TL_SERVER")
+# LOGIN TO TRADELOCKER
+def login():
+    tl = TLAPI(
+        environment=TL_ENV,
+        server=TL_SERVER,
+        email=TL_EMAIL,
+        password=TL_PASSWORD
     )
 
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({"status": "bot online", "env": ENV_URL})
+    tl.get_all_accounts()
 
-@app.route("/test-login", methods=["GET"])
-def test_login():
+    if TL_ACCOUNT_ID:
+        tl.set_account(TL_ACCOUNT_ID)
+
+    return tl
+
+
+@app.route("/")
+def home():
+    return jsonify({
+        "status": "running",
+        "bot": "TradeLocker Railway Bot"
+    })
+
+
+@app.route("/health")
+def health():
     try:
-        tl = get_tl()
-        instruments = tl.get_all_instruments()
+        tl = login()
+
         return jsonify({
             "status": "login_success",
-            "instruments_loaded": True,
-            "count": len(instruments) if hasattr(instruments, "__len__") else "unknown"
+            "has_access_token": True
         })
+
     except Exception as e:
-        print("LOGIN ERROR:", traceback.format_exc(), flush=True)
-        return jsonify({"status": "login_failed", "error": str(e)}), 500
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.json or {}
-    print("WEBHOOK RECEIVED:", data, flush=True)
-
-    if data.get("secret") != os.getenv("WEBHOOK_SECRET"):
-        return jsonify({"error": "bad secret"}), 403
-
-    symbol = data.get("symbol")
-    action = str(data.get("action", "")).lower()
-    qty = float(data.get("lots", data.get("qty", 0.01)))
-
-    if action not in ["buy", "sell"]:
-        return jsonify({"error": "action must be buy or sell"}), 400
 
     try:
-        tl = get_tl()
+        data = request.json
 
-        instrument_id = tl.get_instrument_id_from_symbol_name(symbol)
-        print(f"Instrument found: {symbol} -> {instrument_id}", flush=True)
+        print("ALERT RECEIVED:")
+        print(data)
 
-        order_id = tl.create_order(
-            instrument_id,
-            quantity=qty,
+        secret = data.get("secret")
+
+        if secret != WEBHOOK_SECRET:
+            return jsonify({
+                "error": "Invalid secret"
+            }), 403
+
+        symbol = data.get("symbol")
+        action = data.get("action")
+        lots = float(data.get("lots", 0.01))
+        sl = float(data.get("sl", 0))
+        tp = float(data.get("tp", 0))
+
+        tl = login()
+
+        print("LOGIN SUCCESS")
+
+        # GET ALL INSTRUMENTS
+        all_instruments = tl.get_all_instruments()
+
+        print("SEARCHING FOR SYMBOL:", symbol)
+
+        # SEARCH MATCHES
+        matches = all_instruments[
+            all_instruments["name"].str.contains(symbol, case=False, na=False)
+        ]
+
+        print("MATCHING SYMBOLS:")
+        print(matches[["tradableInstrumentId", "name"]])
+
+        if matches.empty:
+            return jsonify({
+                "error": f"No matching instrument for {symbol}"
+            }), 400
+
+        # USE FIRST MATCH
+        instrument_id = matches.iloc[0]["tradableInstrumentId"]
+
+        print("USING INSTRUMENT ID:", instrument_id)
+
+        # PLACE ORDER
+        order = tl.create_order(
+            instrument_id=instrument_id,
+            quantity=lots,
             side=action,
-            type_="market"
+            type_="market",
+            stop_loss=sl,
+            take_profit=tp
         )
 
-        print(f"ORDER SENT: {action.upper()} {symbol} {qty} order_id={order_id}", flush=True)
+        print("ORDER SUCCESS:")
+        print(order)
 
         return jsonify({
-            "status": "order_sent",
+            "status": "success",
             "symbol": symbol,
             "action": action,
-            "lots": qty,
-            "instrument_id": instrument_id,
-            "order_id": order_id
+            "lots": lots,
+            "sl": sl,
+            "tp": tp,
+            "order": str(order)
         })
 
     except Exception as e:
-        print("ORDER ERROR:", traceback.format_exc(), flush=True)
+
+        print("ORDER ERROR:")
+        traceback.print_exc()
+
         return jsonify({
-            "status": "order_failed",
-            "error": str(e),
-            "received": data
+            "status": "error",
+            "message": str(e)
         }), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
