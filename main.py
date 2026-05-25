@@ -6,38 +6,42 @@ import re
 
 app = Flask(__name__)
 
-# =========================
+# ============================================
 # ENV VARIABLES
-# =========================
+# ============================================
 TL_EMAIL = os.getenv("TL_EMAIL")
 TL_PASSWORD = os.getenv("TL_PASSWORD")
 TL_SERVER = os.getenv("TL_SERVER")
 TL_ENV = os.getenv("TL_ENV", "live")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
-# =========================
+# ============================================
 # GLOBAL CACHE
-# =========================
+# ============================================
 INSTRUMENT_CACHE = {}
 
-# =========================
-# HELPERS
-# =========================
+
+# ============================================
+# CLEAN SYMBOL
+# ============================================
 def clean_symbol(symbol):
     return re.sub(r"[^A-Z0-9]", "", str(symbol).upper())
 
 
-# =========================
-# LOGIN
-# =========================
+# ============================================
+# TRADELOCKER LOGIN
+# ============================================
 def get_tl():
 
-    # IMPORTANT:
-    # DO NOT USE email=
-    # DO NOT USE environment URL
+    # FIXED URL ISSUE
+    env_url = (
+        "https://live.tradelocker.com"
+        if TL_ENV == "live"
+        else "https://demo.tradelocker.com"
+    )
 
     tl = TLAPI(
-        environment=TL_ENV,
+        environment=env_url,
         username=TL_EMAIL,
         password=TL_PASSWORD,
         server=TL_SERVER
@@ -46,9 +50,9 @@ def get_tl():
     return tl
 
 
-# =========================
-# LOAD ALL INSTRUMENTS
-# =========================
+# ============================================
+# LOAD INSTRUMENTS
+# ============================================
 def load_instruments():
 
     global INSTRUMENT_CACHE
@@ -95,9 +99,9 @@ def load_instruments():
     print(f"Loaded {len(INSTRUMENT_CACHE)} symbols", flush=True)
 
 
-# =========================
-# FIND SYMBOL
-# =========================
+# ============================================
+# FIND INSTRUMENT
+# ============================================
 def find_instrument(symbol):
 
     global INSTRUMENT_CACHE
@@ -115,15 +119,20 @@ def find_instrument(symbol):
     for key, value in INSTRUMENT_CACHE.items():
 
         if cleaned in key or key in cleaned:
-            print(f"PARTIAL MATCH: {symbol} -> {value}", flush=True)
+
+            print(
+                f"PARTIAL MATCH: {symbol} -> {value}",
+                flush=True
+            )
+
             return value
 
     raise Exception(f"No instrument found for {symbol}")
 
 
-# =========================
+# ============================================
 # HOME
-# =========================
+# ============================================
 @app.route("/", methods=["GET"])
 def home():
 
@@ -134,9 +143,9 @@ def home():
     })
 
 
-# =========================
+# ============================================
 # TEST LOGIN
-# =========================
+# ============================================
 @app.route("/test-login", methods=["GET"])
 def test_login():
 
@@ -159,9 +168,9 @@ def test_login():
         }), 500
 
 
-# =========================
-# RELOAD SYMBOLS
-# =========================
+# ============================================
+# RELOAD INSTRUMENTS
+# ============================================
 @app.route("/reload-instruments", methods=["GET"])
 def reload_instruments():
 
@@ -184,9 +193,9 @@ def reload_instruments():
         }), 500
 
 
-# =========================
+# ============================================
 # FIND SYMBOL
-# =========================
+# ============================================
 @app.route("/find-symbol/<symbol>", methods=["GET"])
 def find_symbol(symbol):
 
@@ -208,9 +217,9 @@ def find_symbol(symbol):
         }), 404
 
 
-# =========================
+# ============================================
 # WEBHOOK
-# =========================
+# ============================================
 @app.route("/webhook", methods=["POST"])
 def webhook():
 
@@ -252,7 +261,7 @@ def webhook():
             flush=True
         )
 
-        # MARKET ORDER
+        # SEND MARKET ORDER
         order = tl.create_order(
             instrument_id=instrument_id,
             quantity=lots,
@@ -276,7 +285,11 @@ def webhook():
 
     except Exception as e:
 
-        print("ORDER ERROR:", traceback.format_exc(), flush=True)
+        print(
+            "ORDER ERROR:",
+            traceback.format_exc(),
+            flush=True
+        )
 
         return jsonify({
             "status": "failed",
@@ -285,9 +298,9 @@ def webhook():
         }), 500
 
 
-# =========================
+# ============================================
 # STARTUP
-# =========================
+# ============================================
 try:
 
     load_instruments()
@@ -301,9 +314,9 @@ except Exception as e:
     )
 
 
-# =========================
+# ============================================
 # RUN APP
-# =========================
+# ============================================
 if __name__ == "__main__":
 
     app.run(
