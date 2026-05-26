@@ -6,31 +6,32 @@ from tradelocker import TLAPI
 
 app = Flask(__name__)
 
-# ============================================
+# ==================================================
 # CONFIG
-# ============================================
+# ==================================================
 
 TL_EMAIL = os.getenv("TL_EMAIL")
 TL_PASSWORD = os.getenv("TL_PASSWORD")
 TL_SERVER = os.getenv("TL_SERVER")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
+# YOUR FUNDED ACCOUNT
 ACCOUNT_ID = 747681
 ACC_NUM = 2
 
 INSTRUMENT_CACHE = {}
 
-# ============================================
+# ==================================================
 # HELPERS
-# ============================================
+# ==================================================
 
 def clean_symbol(symbol):
     return re.sub(r"[^A-Z0-9]", "", str(symbol).upper())
 
 
-# ============================================
+# ==================================================
 # LOGIN
-# ============================================
+# ==================================================
 
 def get_tl():
 
@@ -39,27 +40,23 @@ def get_tl():
         username=TL_EMAIL,
         password=TL_PASSWORD,
         server=TL_SERVER,
+        account_id=747681,
+        acc_num=2,
         log_level="debug"
-    )
-
-    # FORCE ACCOUNT
-    tl.set_account_id_and_acc_num(
-        ACCOUNT_ID,
-        ACC_NUM
     )
 
     return tl
 
 
-# ============================================
+# ==================================================
 # LOAD SYMBOLS
-# ============================================
+# ==================================================
 
 def load_instruments():
 
     global INSTRUMENT_CACHE
 
-    print("Loading instruments...", flush=True)
+    print("Loading TradeLocker instruments...", flush=True)
 
     tl = get_tl()
 
@@ -72,7 +69,10 @@ def load_instruments():
         try:
 
             name = str(row.get("name", "")).upper()
-            instrument_id = int(row.get("tradableInstrumentId"))
+
+            instrument_id = int(
+                row.get("tradableInstrumentId")
+            )
 
             cleaned = clean_symbol(name)
 
@@ -89,6 +89,7 @@ def load_instruments():
             )
 
             if simplified not in cache:
+
                 cache[simplified] = {
                     "id": instrument_id,
                     "name": name
@@ -99,12 +100,15 @@ def load_instruments():
 
     INSTRUMENT_CACHE = cache
 
-    print(f"Loaded {len(INSTRUMENT_CACHE)} symbols", flush=True)
+    print(
+        f"Loaded {len(INSTRUMENT_CACHE)} symbols",
+        flush=True
+    )
 
 
-# ============================================
+# ==================================================
 # FIND SYMBOL
-# ============================================
+# ==================================================
 
 def find_instrument(symbol):
 
@@ -120,20 +124,28 @@ def find_instrument(symbol):
         if requested in key or key in requested:
             return value
 
-    raise Exception(f"No instrument found for {symbol}")
+    raise Exception(
+        f"No instrument found for {symbol}"
+    )
 
 
-# ============================================
+# ==================================================
 # CALCULATE SL TP
-# ============================================
+# ==================================================
 
-def calculate_sl_tp(action, entry_price, sl_distance, tp_distance):
-
-    action = action.lower()
+def calculate_sl_tp(
+    action,
+    entry_price,
+    sl_distance,
+    tp_distance
+):
 
     sl_price = None
     tp_price = None
 
+    action = action.lower()
+
+    # STOP LOSS
     if sl_distance is not None:
 
         sl_distance = float(sl_distance)
@@ -143,6 +155,7 @@ def calculate_sl_tp(action, entry_price, sl_distance, tp_distance):
         else:
             sl_price = entry_price + sl_distance
 
+    # TAKE PROFIT
     if tp_distance is not None:
 
         tp_distance = float(tp_distance)
@@ -155,22 +168,23 @@ def calculate_sl_tp(action, entry_price, sl_distance, tp_distance):
     return sl_price, tp_price
 
 
-# ============================================
+# ==================================================
 # HOME
-# ============================================
+# ==================================================
 
 @app.route("/")
 def home():
 
     return jsonify({
         "status": "online",
+        "account_id": ACCOUNT_ID,
         "symbols_loaded": len(INSTRUMENT_CACHE)
     })
 
 
-# ============================================
-# FIND SYMBOL ROUTE
-# ============================================
+# ==================================================
+# FIND SYMBOL
+# ==================================================
 
 @app.route("/find-symbol/<symbol>")
 def find_symbol(symbol):
@@ -192,9 +206,9 @@ def find_symbol(symbol):
         }), 404
 
 
-# ============================================
+# ==================================================
 # WEBHOOK
-# ============================================
+# ==================================================
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -203,59 +217,67 @@ def webhook():
 
         data = request.json or {}
 
-        print("WEBHOOK:", data, flush=True)
+        print("WEBHOOK RECEIVED:", data, flush=True)
 
-        # ====================================
-        # SECRET
-        # ====================================
+        # ==========================================
+        # SECRET CHECK
+        # ==========================================
 
         if data.get("secret") != WEBHOOK_SECRET:
 
             return jsonify({
-                "error": "bad secret"
+                "error": "Invalid secret"
             }), 403
 
-        # ====================================
+        # ==========================================
         # INPUTS
-        # ====================================
+        # ==========================================
 
-        symbol = str(data.get("symbol", "")).upper()
-        action = str(data.get("action", "")).lower()
+        symbol = str(
+            data.get("symbol", "")
+        ).upper()
+
+        action = str(
+            data.get("action", "")
+        ).lower()
 
         lots = float(
             data.get("lots", 0.01)
         )
 
-        sl_distance = data.get("sl")
-        tp_distance = data.get("tp")
-
         entry_price = float(
             data.get("price", 0)
         )
 
-        # ====================================
+        sl_distance = data.get("sl")
+        tp_distance = data.get("tp")
+
+        # ==========================================
         # VALIDATE
-        # ====================================
+        # ==========================================
 
         if action not in ["buy", "sell"]:
 
             return jsonify({
-                "error": "invalid action"
+                "error": "Invalid action"
             }), 400
 
-        # ====================================
+        # ==========================================
         # FIND SYMBOL
-        # ====================================
+        # ==========================================
 
         match = find_instrument(symbol)
 
         instrument_id = match["id"]
 
-        print("MATCH:", match, flush=True)
+        print(
+            f"MATCHED SYMBOL: {match}",
+            flush=True
+        )
 
-        # ====================================
-        # CALCULATE REAL PRICES
-        # ====================================
+        # ==========================================
+        # CALCULATE REAL SL TP PRICES
+        # ==========================================
 
         sl_price, tp_price = calculate_sl_tp(
             action,
@@ -271,26 +293,44 @@ def webhook():
             flush=True
         )
 
-        # ====================================
-        # CONNECT
-        # ====================================
+        # ==========================================
+        # LOGIN
+        # ==========================================
 
         tl = get_tl()
 
-        # ====================================
+        # ==========================================
         # CREATE ORDER
-        # ====================================
+        # ==========================================
 
-        order = tl.create_order(
-            instrument_id=instrument_id,
-            quantity=lots,
-            side=action,
-            type_="market",
-            stop_loss=sl_price,
-            take_profit=tp_price
+        order_kwargs = {
+            "instrument_id": instrument_id,
+            "quantity": lots,
+            "side": action,
+            "type_": "market"
+        }
+
+        # ADD SL TP ONLY IF PRESENT
+
+        if sl_price is not None:
+            order_kwargs["stop_loss"] = sl_price
+
+        if tp_price is not None:
+            order_kwargs["take_profit"] = tp_price
+
+        print(
+            f"ORDER KWARGS: {order_kwargs}",
+            flush=True
         )
 
-        print("ORDER SUCCESS:", order, flush=True)
+        order = tl.create_order(
+            **order_kwargs
+        )
+
+        print(
+            f"ORDER SUCCESS: {order}",
+            flush=True
+        )
 
         return jsonify({
             "success": True,
@@ -308,7 +348,10 @@ def webhook():
 
         error = traceback.format_exc()
 
-        print("ORDER ERROR:", error, flush=True)
+        print(
+            f"ORDER ERROR: {error}",
+            flush=True
+        )
 
         return jsonify({
             "success": False,
@@ -317,9 +360,9 @@ def webhook():
         }), 500
 
 
-# ============================================
+# ==================================================
 # STARTUP
-# ============================================
+# ==================================================
 
 try:
 
@@ -328,15 +371,14 @@ try:
 except Exception as e:
 
     print(
-        "STARTUP ERROR:",
-        str(e),
+        f"STARTUP ERROR: {e}",
         flush=True
     )
 
 
-# ============================================
+# ==================================================
 # RUN
-# ============================================
+# ==================================================
 
 if __name__ == "__main__":
 
