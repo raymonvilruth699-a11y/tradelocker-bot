@@ -1,13 +1,13 @@
-import os
-import re
-import traceback
 from flask import Flask, request, jsonify
 from tradelocker import TLAPI
+import os
+import traceback
+import re
 
 app = Flask(__name__)
 
 # ==================================================
-# CONFIG
+# ENV VARIABLES
 # ==================================================
 
 TL_EMAIL = os.getenv("TL_EMAIL")
@@ -15,9 +15,9 @@ TL_PASSWORD = os.getenv("TL_PASSWORD")
 TL_SERVER = os.getenv("TL_SERVER")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
-# YOUR FUNDED ACCOUNT
-ACCOUNT_ID = 747681
-ACC_NUM = 2
+# ==================================================
+# GLOBALS
+# ==================================================
 
 INSTRUMENT_CACHE = {}
 
@@ -27,7 +27,6 @@ INSTRUMENT_CACHE = {}
 
 def clean_symbol(symbol):
     return re.sub(r"[^A-Z0-9]", "", str(symbol).upper())
-
 
 # ==================================================
 # LOGIN
@@ -40,16 +39,13 @@ def get_tl():
         username=TL_EMAIL,
         password=TL_PASSWORD,
         server=TL_SERVER,
-        account_id=747681,
-        acc_num=2,
         log_level="debug"
     )
 
     return tl
 
-
 # ==================================================
-# LOAD SYMBOLS
+# LOAD INSTRUMENTS
 # ==================================================
 
 def load_instruments():
@@ -84,8 +80,8 @@ def load_instruments():
             simplified = (
                 cleaned
                 .replace(".B", "")
-                .replace(".R", "")
                 .replace(".M", "")
+                .replace(".R", "")
             )
 
             if simplified not in cache:
@@ -105,20 +101,19 @@ def load_instruments():
         flush=True
     )
 
-
 # ==================================================
-# FIND SYMBOL
+# FIND INSTRUMENT
 # ==================================================
 
 def find_instrument(symbol):
 
     requested = clean_symbol(symbol)
 
-    # exact
+    # EXACT MATCH
     if requested in INSTRUMENT_CACHE:
         return INSTRUMENT_CACHE[requested]
 
-    # partial
+    # PARTIAL MATCH
     for key, value in INSTRUMENT_CACHE.items():
 
         if requested in key or key in requested:
@@ -128,9 +123,8 @@ def find_instrument(symbol):
         f"No instrument found for {symbol}"
     )
 
-
 # ==================================================
-# CALCULATE SL TP
+# CALCULATE SL / TP
 # ==================================================
 
 def calculate_sl_tp(
@@ -140,12 +134,11 @@ def calculate_sl_tp(
     tp_distance
 ):
 
+    action = action.lower()
+
     sl_price = None
     tp_price = None
 
-    action = action.lower()
-
-    # STOP LOSS
     if sl_distance is not None:
 
         sl_distance = float(sl_distance)
@@ -155,7 +148,6 @@ def calculate_sl_tp(
         else:
             sl_price = entry_price + sl_distance
 
-    # TAKE PROFIT
     if tp_distance is not None:
 
         tp_distance = float(tp_distance)
@@ -167,7 +159,6 @@ def calculate_sl_tp(
 
     return sl_price, tp_price
 
-
 # ==================================================
 # HOME
 # ==================================================
@@ -177,10 +168,8 @@ def home():
 
     return jsonify({
         "status": "online",
-        "account_id": ACCOUNT_ID,
         "symbols_loaded": len(INSTRUMENT_CACHE)
     })
-
 
 # ==================================================
 # FIND SYMBOL
@@ -205,7 +194,6 @@ def find_symbol(symbol):
             "error": str(e)
         }), 404
 
-
 # ==================================================
 # WEBHOOK
 # ==================================================
@@ -217,7 +205,10 @@ def webhook():
 
         data = request.json or {}
 
-        print("WEBHOOK RECEIVED:", data, flush=True)
+        print(
+            f"WEBHOOK RECEIVED: {data}",
+            flush=True
+        )
 
         # ==========================================
         # SECRET CHECK
@@ -246,14 +237,14 @@ def webhook():
         )
 
         entry_price = float(
-            data.get("price", 0)
+            data.get("price")
         )
 
         sl_distance = data.get("sl")
         tp_distance = data.get("tp")
 
         # ==========================================
-        # VALIDATE
+        # VALIDATION
         # ==========================================
 
         if action not in ["buy", "sell"]:
@@ -266,17 +257,15 @@ def webhook():
         # FIND SYMBOL
         # ==========================================
 
-        match = find_instrument(symbol)
-
-        instrument_id = match["id"]
+        instrument = find_instrument(symbol)
 
         print(
-            f"MATCHED SYMBOL: {match}",
+            f"MATCHED SYMBOL: {instrument}",
             flush=True
         )
 
         # ==========================================
-        # CALCULATE REAL SL TP PRICES
+        # CALCULATE SL TP
         # ==========================================
 
         sl_price, tp_price = calculate_sl_tp(
@@ -300,28 +289,34 @@ def webhook():
         tl = get_tl()
 
         # ==========================================
-        # CREATE ORDER
+        # ORDER KWARGS
         # ==========================================
 
         order_kwargs = {
-            "instrument_id": instrument_id,
+
+            "instrument_id": instrument["id"],
+
             "quantity": lots,
+
             "side": action,
-            "type_": "market"
+
+            "type_": "market",
+
+            "stop_loss": sl_price,
+            "stop_loss_type": "absolute",
+
+            "take_profit": tp_price,
+            "take_profit_type": "absolute"
         }
-
-        # ADD SL TP ONLY IF PRESENT
-
-        if sl_price is not None:
-            order_kwargs["stop_loss"] = sl_price
-
-        if tp_price is not None:
-            order_kwargs["take_profit"] = tp_price
 
         print(
             f"ORDER KWARGS: {order_kwargs}",
             flush=True
         )
+
+        # ==========================================
+        # CREATE ORDER
+        # ==========================================
 
         order = tl.create_order(
             **order_kwargs
@@ -335,7 +330,7 @@ def webhook():
         return jsonify({
             "success": True,
             "symbol": symbol,
-            "matched": match["name"],
+            "matched": instrument["name"],
             "action": action,
             "lots": lots,
             "entry": entry_price,
@@ -359,7 +354,6 @@ def webhook():
             "traceback": error
         }), 500
 
-
 # ==================================================
 # STARTUP
 # ==================================================
@@ -374,7 +368,6 @@ except Exception as e:
         f"STARTUP ERROR: {e}",
         flush=True
     )
-
 
 # ==================================================
 # RUN
