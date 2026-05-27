@@ -320,8 +320,12 @@ def webhook():
 positions = tl.get_all_positions()
 
 same_trade_open = False
+try:
+    position_rows = positions.iterrows()
+except Exception:
+    position_rows = []
 
-for _, pos in positions.iterrows():
+for _, pos in position_rows:
 
     pos_instrument_id = str(pos.get("tradableInstrumentId", ""))
     pos_side = str(pos.get("side", "")).lower()
