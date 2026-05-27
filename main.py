@@ -313,7 +313,41 @@ def webhook():
             f"ORDER KWARGS: {order_kwargs}",
             flush=True
         )
+# ==========================================
+# CHECK FOR OPEN POSITIONS
+# ==========================================
 
+positions = tl.get_all_positions()
+
+same_trade_open = False
+
+for _, pos in positions.iterrows():
+
+    pos_instrument_id = str(pos.get("tradableInstrumentId", ""))
+    pos_side = str(pos.get("side", "")).lower()
+
+    if (
+        pos_instrument_id == str(instrument["id"])
+        and pos_side == action.lower()
+    ):
+        same_trade_open = True
+        break
+
+# ==========================================
+# BLOCK DUPLICATE TRADE
+# ==========================================
+
+if same_trade_open:
+
+    print(
+        f"SKIPPING: {symbol} {action} already open",
+        flush=True
+    )
+
+    return jsonify({
+        "success": False,
+        "message": "Trade already open"
+    })
         # ==========================================
         # CREATE ORDER
         # ==========================================
